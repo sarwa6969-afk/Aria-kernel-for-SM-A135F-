@@ -547,30 +547,32 @@ jobs:
           pt.write_text(text)
           print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
-          vdso_c = Path("arch/arm64/kernel/vdso.c")
-          vt = vdso_c.read_text()
-          if "extern s64 uptime_offset_sec;" not in vt:
-              vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
-
-          wtm_anchor = "vdso_data->wtm_clock_sec\t\t= tk->wall_to_monotonic.tv_sec;"
-          if wtm_anchor not in vt:
-              vt, n = re.subn(
-                  r'(vdso_data->wtm_clock_sec\s*=\s*tk->wall_to_monotonic\.tv_sec;)',
-                  r'\1\n\tif (uptime_offset_sec > 0)\n\t\tvdso_data->wtm_clock_sec += uptime_offset_sec;',
-                  vt,
-                  count=1
-              )
-              assert n > 0, "wtm_clock_sec assignment not found in vdso.c"
+          # 2. Patch Generic vDSO (kernel/time/vsyscall.c) yang dipakai kernel 4.19.325
+          vsys = Path("kernel/time/vsyscall.c")
+          if vsys.exists():
+              vt = vsys.read_text()
+              if "extern s64 uptime_offset_sec;" not in vt:
+                  vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
+              anchor = "vdso_ts = &vdata[CS_HRES_COARSE].basetime[CLOCK_BOOTTIME];"
+              if anchor in vt:
+                  patch = anchor + "\n\tvdso_ts->sec += uptime_offset_sec;"
+                  vt = vt.replace(anchor, patch, 1)
+                  vsys.write_text(vt)
+                  print("Patched CLOCK_BOOTTIME basetime in kernel/time/vsyscall.c")
+              else:
+                  # Fallback untuk variasi vdata single-pointer di 4.19
+                  vt_new, n = re.subn(
+                      r'(basetime\[CLOCK_BOOTTIME\]\.sec\s*=\s*[^;]+;)',
+                      r'\1\n\tif (uptime_offset_sec > 0) vdata->basetime[CLOCK_BOOTTIME].sec += uptime_offset_sec;',
+                      vt,
+                      count=1
+                  )
+                  assert n > 0, "CLOCK_BOOTTIME basetime not found in kernel/time/vsyscall.c"
+                  vsys.write_text(vt_new)
+                  print("Patched CLOCK_BOOTTIME basetime (vdata) in kernel/time/vsyscall.c")
           else:
-              vt = vt.replace(
-                  wtm_anchor,
-                  wtm_anchor + "\n\tif (uptime_offset_sec > 0)\n\t\tvdso_data->wtm_clock_sec += uptime_offset_sec;",
-                  1
-              )
+              print("WARNING: kernel/time/vsyscall.c not found")
 
-          vdso_c.write_text(vt)
-          print("Patched vdso_data->wtm_clock_sec in arch/arm64/kernel/vdso.c")
-          PY
 
 
 
