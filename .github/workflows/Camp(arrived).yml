@@ -431,8 +431,11 @@ jobs:
           #include <linux/kernel_stat.h>
           #include <linux/uaccess.h>
           #include <linux/slab.h>
+          #include <linux/export.h>
 
-          static s64 uptime_offset_sec;
+          s64 uptime_offset_sec = 0;
+          EXPORT_SYMBOL(uptime_offset_sec);
+
 
           static int uptime_proc_show(struct seq_file *m, void *v)
           {
@@ -515,6 +518,37 @@ jobs:
           }
           fs_initcall(proc_uptime_init);
           EOF
+          python3 - <<'PY'
+          from pathlib import Path
+
+          pt = Path("kernel/time/posix-timers.c")
+          text = pt.read_text()
+
+          inc_anchor = '#include "posix-timers.h"'
+          assert inc_anchor in text, "posix-timers.h include not found"
+          if "extern s64 uptime_offset_sec;" not in text:
+              text = text.replace(inc_anchor, inc_anchor + "\n\nextern s64 uptime_offset_sec;", 1)
+
+          old_fn = """static int posix_get_boottime(const clockid_t which_clock, struct timespec64 *tp)
+          {
+          \tktime_get_boottime_ts64(tp);
+          \treturn 0;
+          }"""
+
+          new_fn = """static int posix_get_boottime(const clockid_t which_clock, struct timespec64 *tp)
+          {
+          \tktime_get_boottime_ts64(tp);
+          \tif (uptime_offset_sec > 0) {
+          \t\ttp->tv_sec += uptime_offset_sec;
+          \t}
+          \treturn 0;
+          }"""
+
+          assert old_fn in text, "posix_get_boottime not found"
+          text = text.replace(old_fn, new_fn, 1)
+          pt.write_text(text)
+          print("Successfully patched posix_get_boottime in kernel/time/posix-timers.c")
+          PY
 
 
       - name: Apply Non-GKI 4.19 SuSFS (JackA1ltman + Exynos 850 diffs)
@@ -529,7 +563,7 @@ jobs:
                 echo "${dir}/${name}"
                 return 0
               fi
-            done
+            done.
           }
 
           VFS_FIX="$(find_diff "susfs-2.3.0-vfs-create-mount.diff")"
