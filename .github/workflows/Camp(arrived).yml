@@ -549,6 +549,17 @@ jobs:
           pt.write_text(text)
           print("Successfully patched posix_get_boottime in kernel/time/posix-timers.c")
           PY
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for rel in ["arch/arm64/kernel/vdso/gettimeofday.S", "arch/arm64/kernel/vdso32/vgettimeofday.c"]:
+              p = Path(rel)
+              if p.exists():
+                  t = p.read_text()
+                  if "CLOCK_BOOTTIME" in t:
+                      p.write_text(t.replace("CLOCK_BOOTTIME", "255"))
+                      print(f"Bypassed CLOCK_BOOTTIME in {rel}")
+          PY
 
 
       - name: Apply Non-GKI 4.19 SuSFS (JackA1ltman + Exynos 850 diffs)
