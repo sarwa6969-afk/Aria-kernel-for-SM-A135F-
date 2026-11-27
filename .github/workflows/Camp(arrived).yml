@@ -520,61 +520,44 @@ jobs:
           EOF
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           pt = Path("kernel/time/posix-timers.c")
           text = pt.read_text()
 
           inc_anchor = '#include "posix-timers.h"'
-          assert inc_anchor in text, "posix-timers.h include not found"
+          assert inc_anchor in text, "posix-timers.h not found"
           if "extern s64 uptime_offset_sec;" not in text:
               text = text.replace(inc_anchor, inc_anchor + "\n\nextern s64 uptime_offset_sec;", 1)
 
-          old_fn = """static int posix_get_boottime(const clockid_t which_clock, struct timespec64 *tp)
-          {
-          \tktime_get_boottime_ts64(tp);
-          \treturn 0;
-          }"""
+          sys_anchor = "error = kc->clock_get(which_clock, &kernel_tp);"
+          sys_patch = """error = kc->clock_get(which_clock, &kernel_tp);
+          \tif (!error && which_clock == CLOCK_BOOTTIME && uptime_offset_sec > 0)
+          \t\tkernel_tp.tv_sec += uptime_offset_sec;"""
+          assert sys_anchor in text, "SYSCALL clock_gettime anchor not found"
+          text = text.replace(sys_anchor, sys_patch, 1)
 
-          new_fn = """static int posix_get_boottime(const clockid_t which_clock, struct timespec64 *tp)
-          {
-          \tktime_get_boottime_ts64(tp);
-          \tif (uptime_offset_sec > 0) {
-          \t\ttp->tv_sec += uptime_offset_sec;
-          \t}
-          \treturn 0;
-          }"""
+          compat_anchor = "err = kc->clock_get(which_clock, &ts);"
+          compat_patch = """err = kc->clock_get(which_clock, &ts);
+          \tif (!err && which_clock == CLOCK_BOOTTIME && uptime_offset_sec > 0)
+          \t\tts.tv_sec += uptime_offset_sec;"""
+          if compat_anchor in text:
+              text = text.replace(compat_anchor, compat_patch, 1)
 
-          assert old_fn in text, "posix_get_boottime not found"
-          text = text.replace(old_fn, new_fn, 1)
           pt.write_text(text)
-          print("Successfully patched posix_get_boottime in kernel/time/posix-timers.c")
-          PY
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
-          vdso64 = Path("arch/arm64/kernel/vdso/gettimeofday.S")
-          if vdso64.exists():
-              t = vdso64.read_text()
-              # Alihkan langsung __kernel_clock_gettime ke syscall kernel (svc #0)
-              stub = """ENTRY(__kernel_clock_gettime)
-           \tmov\tx8, #__NR_clock_gettime
-           \tsvc\t#0
-           \tret
-           ENDPROC(__kernel_clock_gettime)
-          """
-              t_new, n = re.subn(
-                  r'ENTRY\(__kernel_clock_gettime\).*?ENDPROC\(__kernel_clock_gettime\)',
-                  stub.strip(),
-                  t,
-                  flags=re.DOTALL
-              )
-              if n > 0:
-                  vdso64.write_text(t_new)
-                  print("Successfully redirected __kernel_clock_gettime to kernel syscall")
+          vdso_c = Path("arch/arm64/kernel/vdso.c")
+          if vdso_c.exists():
+              vt = vdso_c.read_text()
+              if "vdso_data->use_syscall" in vt:
+                  vt = re.sub(r'vdso_data->use_syscall\s*=\s*[^;]+;', 'vdso_data->use_syscall = 1;', vt)
+                  vdso_c.write_text(vt)
+                  print("Forced vdso_data->use_syscall = 1 in arch/arm64/kernel/vdso.c")
               else:
-                  print("WARNING: __kernel_clock_gettime block not found")
+                  print("WARNING: vdso_data->use_syscall not found in vdso.c")
           PY
+
 
 
 
