@@ -126,7 +126,7 @@ concurrency:
 env:
   ARCH: arm64
   OUT: out
-  KNAME: Camp
+  KNAME: Masbro48
   ARIA_CI: ${{ github.workspace }}/ci
   CIP_GIT_URL: https://git.kernel.org/pub/scm/linux/kernel/git/cip/linux-cip.git
   KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'Samsung-Galaxy-A13-A135F-Development/android_kernel_samsung_exynos850' }}
