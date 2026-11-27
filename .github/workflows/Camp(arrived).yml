@@ -547,15 +547,20 @@ jobs:
           pt.write_text(text)
           print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
-          # 2. Cetak isi vdso.c & vsyscall.c agar langsung terlihat fungsi update_vsyscall-nya
-          for vfile in ["kernel/time/vsyscall.c", "arch/arm64/kernel/vdso.c"]:
-              vp = Path(vfile)
-              print(f"=== FILE: {vfile} (exists={vp.exists()}) ===")
-              if vp.exists():
-                  for idx, line in enumerate(vp.read_text().splitlines(), 1):
-                      if any(k in line for k in ["vsyscall", "vdso", "tk", "boot", "mono", "xtime", "sec", "clock"]):
-                          print(f"  {idx}: {line}")
+          # 2. Patch Generic vDSO basetime[CLOCK_BOOTTIME] di kernel/time/vsyscall.c
+          vsys = Path("kernel/time/vsyscall.c")
+          vt = vsys.read_text()
+          if "extern s64 uptime_offset_sec;" not in vt:
+              vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
+
+          target = "vdso_ts\t\t= &vdata[CS_HRES_COARSE].basetime[CLOCK_BOOTTIME];\n\tvdso_ts->sec\t= sec;"
+          replacement = "vdso_ts\t\t= &vdata[CS_HRES_COARSE].basetime[CLOCK_BOOTTIME];\n\tvdso_ts->sec\t= sec + (uptime_offset_sec > 0 ? uptime_offset_sec : 0);"
+          assert target in vt, "CLOCK_BOOTTIME target lines not found in kernel/time/vsyscall.c"
+          vt = vt.replace(target, replacement, 1)
+          vsys.write_text(vt)
+          print("Successfully patched basetime[CLOCK_BOOTTIME] in kernel/time/vsyscall.c")
           PY
+
 
 
 
