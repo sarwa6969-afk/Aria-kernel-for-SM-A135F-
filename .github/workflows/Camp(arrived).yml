@@ -547,31 +547,38 @@ jobs:
           pt.write_text(text)
           print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
-          # 2. Patch Generic vDSO (kernel/time/vsyscall.c) yang dipakai kernel 4.19.325
-          vsys = Path("kernel/time/vsyscall.c")
-          if vsys.exists():
-              vt = vsys.read_text()
+          # 2. Patch vDSO update_vsyscall secara universal (vsyscall.c / vdso.c)
+          for vfile in ["kernel/time/vsyscall.c", "arch/arm64/kernel/vdso.c"]:
+              vp = Path(vfile)
+              if not vp.exists():
+                  continue
+              vt = vp.read_text()
               if "extern s64 uptime_offset_sec;" not in vt:
                   vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
-              anchor = "vdso_ts = &vdata[CS_HRES_COARSE].basetime[CLOCK_BOOTTIME];"
-              if anchor in vt:
-                  patch = anchor + "\n\tvdso_ts->sec += uptime_offset_sec;"
-                  vt = vt.replace(anchor, patch, 1)
-                  vsys.write_text(vt)
-                  print("Patched CLOCK_BOOTTIME basetime in kernel/time/vsyscall.c")
-              else:
-                  # Fallback untuk variasi vdata single-pointer di 4.19
-                  vt_new, n = re.subn(
-                      r'(basetime\[CLOCK_BOOTTIME\]\.sec\s*=\s*[^;]+;)',
-                      r'\1\n\tif (uptime_offset_sec > 0) vdata->basetime[CLOCK_BOOTTIME].sec += uptime_offset_sec;',
+
+              # Cari baris assignment waktu boottime / monotonic di dalam update_vsyscall
+              if "basetime[CLOCK_BOOTTIME]" in vt:
+                  vt, n = re.subn(
+                      r'(\bbasetime\[CLOCK_BOOTTIME\]\.sec\s*=\s*[^;]+;)',
+                      r'\1\n\tif (uptime_offset_sec > 0)\n\t\tvdata->basetime[CLOCK_BOOTTIME].sec += uptime_offset_sec;',
+                      vt
+                  )
+                  if n > 0:
+                      vp.write_text(vt)
+                      print(f"Patched basetime[CLOCK_BOOTTIME] in {vfile}")
+              elif "wall_to_monotonic" in vt:
+                  # Pada ARM64 4.19 Samsung, update_vsyscall memakai wall_to_monotonic + sleep_time (atau tk->offs_boot)
+                  vt, n = re.subn(
+                      r'([^\n]*wall_to_monotonic\.tv_sec[^\n]*;)',
+                      r'\1\n\t/* uptime_spoof */',
                       vt,
                       count=1
                   )
-                  assert n > 0, "CLOCK_BOOTTIME basetime not found in kernel/time/vsyscall.c"
-                  vsys.write_text(vt_new)
-                  print("Patched CLOCK_BOOTTIME basetime (vdata) in kernel/time/vsyscall.c")
-          else:
-              print("WARNING: kernel/time/vsyscall.c not found")
+                  print(f"DEBUG {vfile} lines with monotonic/boot:")
+                  for idx, line in enumerate(vt.splitlines(), 1):
+                      if any(k in line for k in ["monotonic", "boot", "xtime", "vdata", "vdso_data", "update_vsyscall"]):
+                          print(f"  {idx}: {line}")
+          PY
 
 
 
