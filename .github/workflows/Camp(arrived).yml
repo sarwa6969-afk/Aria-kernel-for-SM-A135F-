@@ -563,7 +563,7 @@ jobs:
                 echo "${dir}/${name}"
                 return 0
               fi
-            done.
+            done
           }
 
           VFS_FIX="$(find_diff "susfs-2.3.0-vfs-create-mount.diff")"
