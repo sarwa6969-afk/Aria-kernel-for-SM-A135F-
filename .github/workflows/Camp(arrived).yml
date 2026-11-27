@@ -548,15 +548,30 @@ jobs:
           print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
           vdso_c = Path("arch/arm64/kernel/vdso.c")
-          if vdso_c.exists():
-              vt = vdso_c.read_text()
-              if "vdso_data->use_syscall" in vt:
-                  vt = re.sub(r'vdso_data->use_syscall\s*=\s*[^;]+;', 'vdso_data->use_syscall = 1;', vt)
-                  vdso_c.write_text(vt)
-                  print("Forced vdso_data->use_syscall = 1 in arch/arm64/kernel/vdso.c")
-              else:
-                  print("WARNING: vdso_data->use_syscall not found in vdso.c")
+          vt = vdso_c.read_text()
+          if "extern s64 uptime_offset_sec;" not in vt:
+              vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
+
+          wtm_anchor = "vdso_data->wtm_clock_sec\t\t= tk->wall_to_monotonic.tv_sec;"
+          if wtm_anchor not in vt:
+              vt, n = re.subn(
+                  r'(vdso_data->wtm_clock_sec\s*=\s*tk->wall_to_monotonic\.tv_sec;)',
+                  r'\1\n\tif (uptime_offset_sec > 0)\n\t\tvdso_data->wtm_clock_sec += uptime_offset_sec;',
+                  vt,
+                  count=1
+              )
+              assert n > 0, "wtm_clock_sec assignment not found in vdso.c"
+          else:
+              vt = vt.replace(
+                  wtm_anchor,
+                  wtm_anchor + "\n\tif (uptime_offset_sec > 0)\n\t\tvdso_data->wtm_clock_sec += uptime_offset_sec;",
+                  1
+              )
+
+          vdso_c.write_text(vt)
+          print("Patched vdso_data->wtm_clock_sec in arch/arm64/kernel/vdso.c")
           PY
+
 
 
 
