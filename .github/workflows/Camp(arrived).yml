@@ -556,21 +556,26 @@ jobs:
           vdso64 = Path("arch/arm64/kernel/vdso/gettimeofday.S")
           if vdso64.exists():
               t = vdso64.read_text()
-              t_new, n = re.subn(r'(cmp\s+w0,\s*#)(CLOCK_BOOTTIME|7)\b', r'\g<1>255', t)
+              # Alihkan langsung __kernel_clock_gettime ke syscall kernel (svc #0)
+              stub = """ENTRY(__kernel_clock_gettime)
+           \tmov\tx8, #__NR_clock_gettime
+           \tsvc\t#0
+           \tret
+           ENDPROC(__kernel_clock_gettime)
+          """
+              t_new, n = re.subn(
+                  r'ENTRY\(__kernel_clock_gettime\).*?ENDPROC\(__kernel_clock_gettime\)',
+                  stub.strip(),
+                  t,
+                  flags=re.DOTALL
+              )
               if n > 0:
                   vdso64.write_text(t_new)
-                  print(f"Bypassed CLOCK_BOOTTIME in vdso64 ({n} replacements)")
+                  print("Successfully redirected __kernel_clock_gettime to kernel syscall")
               else:
-                  print("WARNING: pattern not matched in vdso64")
-
-          vdso32 = Path("arch/arm64/kernel/vdso32/vgettimeofday.c")
-          if vdso32.exists():
-              t32 = vdso32.read_text()
-              t32_new = t32.replace("CLOCK_BOOTTIME", "255")
-              if t32_new != t32:
-                  vdso32.write_text(t32_new)
-                  print("Bypassed CLOCK_BOOTTIME in vdso32")
+                  print("WARNING: __kernel_clock_gettime block not found")
           PY
+
 
 
 
