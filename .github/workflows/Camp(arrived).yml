@@ -547,36 +547,13 @@ jobs:
           pt.write_text(text)
           print("Patched SYSCALL clock_gettime in kernel/time/posix-timers.c")
 
-          # 2. Patch vDSO update_vsyscall secara universal (vsyscall.c / vdso.c)
+          # 2. Cetak isi vdso.c & vsyscall.c agar langsung terlihat fungsi update_vsyscall-nya
           for vfile in ["kernel/time/vsyscall.c", "arch/arm64/kernel/vdso.c"]:
               vp = Path(vfile)
-              if not vp.exists():
-                  continue
-              vt = vp.read_text()
-              if "extern s64 uptime_offset_sec;" not in vt:
-                  vt = "#include <linux/types.h>\nextern s64 uptime_offset_sec;\n" + vt
-
-              # Cari baris assignment waktu boottime / monotonic di dalam update_vsyscall
-              if "basetime[CLOCK_BOOTTIME]" in vt:
-                  vt, n = re.subn(
-                      r'(\bbasetime\[CLOCK_BOOTTIME\]\.sec\s*=\s*[^;]+;)',
-                      r'\1\n\tif (uptime_offset_sec > 0)\n\t\tvdata->basetime[CLOCK_BOOTTIME].sec += uptime_offset_sec;',
-                      vt
-                  )
-                  if n > 0:
-                      vp.write_text(vt)
-                      print(f"Patched basetime[CLOCK_BOOTTIME] in {vfile}")
-              elif "wall_to_monotonic" in vt:
-                  # Pada ARM64 4.19 Samsung, update_vsyscall memakai wall_to_monotonic + sleep_time (atau tk->offs_boot)
-                  vt, n = re.subn(
-                      r'([^\n]*wall_to_monotonic\.tv_sec[^\n]*;)',
-                      r'\1\n\t/* uptime_spoof */',
-                      vt,
-                      count=1
-                  )
-                  print(f"DEBUG {vfile} lines with monotonic/boot:")
-                  for idx, line in enumerate(vt.splitlines(), 1):
-                      if any(k in line for k in ["monotonic", "boot", "xtime", "vdata", "vdso_data", "update_vsyscall"]):
+              print(f"=== FILE: {vfile} (exists={vp.exists()}) ===")
+              if vp.exists():
+                  for idx, line in enumerate(vp.read_text().splitlines(), 1):
+                      if any(k in line for k in ["vsyscall", "vdso", "tk", "boot", "mono", "xtime", "sec", "clock"]):
                           print(f"  {idx}: {line}")
           PY
 
